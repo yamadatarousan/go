@@ -8,12 +8,14 @@ import (
 )
 
 type Service struct {
+	repo      *Repository
 	providers []Provider
 	logger    *slog.Logger
 }
 
-func NewService(logger *slog.Logger, providers ...Provider) *Service {
+func NewService(logger *slog.Logger, repo *Repository, providers ...Provider) *Service {
 	return &Service{
+		repo:      repo,
 		providers: providers,
 		logger:    logger,
 	}
@@ -59,4 +61,18 @@ func (s *Service) AggregateAll(ctx context.Context) []Notification {
 	}
 
 	return allNotifications
+}
+
+func (s *Service) AggregateAndSave(ctx context.Context) ([]Notification, error) {
+	// 1. 段階 2 の並列取得を実行
+	fetched := s.AggregateAll(ctx)
+
+	// 2. 段階 3: DB に保存（重複排除は Repository 側で実施）
+	if err := s.repo.SaveAll(ctx, fetched); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save notifications", "error", err)
+		// 保存失敗しても、メモリ上のデータは返せるので続行
+	}
+
+	// 3. 最新の状態を DB から取得して返す
+	return s.repo.FetchCached(ctx)
 }
