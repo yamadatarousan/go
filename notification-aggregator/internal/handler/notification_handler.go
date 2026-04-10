@@ -15,12 +15,15 @@ func NewNotificationHandler(svc *notification.Service) *NotificationHandler {
 }
 
 func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	notes, err := h.svc.GetNotifications(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// ここで Service の AggregateAll を呼び出す
+	// r.Context() を渡すことで、ブラウザがリクエストをキャンセルした際に
+	// 背後の goroutine（Provider へのリクエスト）も連動して止まるようになります。
+	notes := h.svc.AggregateAll(r.Context())
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(notes)
+	if err := json.NewEncoder(w).Encode(notes); err != nil {
+		// ログ出力などのエラーハンドリング（Stage 4で詳細化）
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }

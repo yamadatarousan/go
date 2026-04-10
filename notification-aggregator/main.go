@@ -18,10 +18,12 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	// 2. 依存関係の構築 (段階1: 単一ソース)
+	// 2. 依存関係の構築
+	// 段階 2: 複数のソースを登録
 	// 下位レイヤー (Provider) から順に作成して注入する
-	mockP := &provider.MockProvider{}
-	svc := notification.NewService(mockP)
+	p1 := &provider.MockProvider{}
+	p2 := &provider.SlowProvider{} // 遅いソース
+	svc := notification.NewService(logger, p1, p2)
 	h := handler.NewNotificationHandler(svc)
 
 	// 3. ルーティングの設定
