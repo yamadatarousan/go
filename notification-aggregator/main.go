@@ -51,9 +51,10 @@ func main() {
 	svc := notification.NewService(logger, repo, p1, p2)
 	h := handler.NewNotificationHandler(svc)
 
-	// 3. ルーティングの設定
+	// 4. ルーティングとミドルウェアの適用 (Stage 4)
 	mux := http.NewServeMux()
-	mux.Handle("/notifications", h)
+	// ハンドラーを RequestIDMiddleware でラップして登録
+	mux.Handle("/notifications", handler.RequestIDMiddleware(h))
 
 	// 4. サーバーの起動
 	srv := &http.Server{

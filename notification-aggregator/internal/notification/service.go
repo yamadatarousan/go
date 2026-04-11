@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"notification-aggregator/internal/contextutil"
 )
 
 type Service struct {
@@ -21,12 +23,42 @@ func NewService(logger *slog.Logger, repo *Repository, providers ...Provider) *S
 	}
 }
 
-func (s *Service) AggregateAll(ctx context.Context) []Notification {
-	// 全体のタイムアウトを設定（例: 2秒）
+func (s *Service) AggregateAndSave(ctx context.Context) ([]Notification, error) {
+	start := time.Now()
+	reqID := contextutil.GetRequestID(ctx)
+
+	// Stage 4: このメソッド内でのログに Request ID を固定で付与する
+	l := s.logger.With("request_id", reqID)
+	l.InfoContext(ctx, "aggregation and save transaction started")
+
+	/// 1. 並列取得 (Stage 2)
+	// aggregateAllInternal にも ID を引き継ぐため、一時的に logger を差し替えるのではなく
+	// 内部処理で l (子ロガー) を使用するよう配慮します。
+	fetched := s.aggregateAllInternal(ctx, l)
+
+	// 2. DB保存 (Stage 3) と計測 (Stage 4）
+	saveStart := time.Now()
+	if err := s.repo.SaveAll(ctx, fetched); err != nil {
+		l.ErrorContext(ctx, "failed to save notifications", "error", err)
+	}
+	l.InfoContext(ctx, "db save finished", "duration_ms", time.Since(saveStart).Milliseconds())
+
+	// 3. 最新リストの取得
+	res, err := s.repo.FetchCached(ctx)
+
+	l.InfoContext(ctx, "aggregation and save completed",
+		"total_duration_ms", time.Since(start).Milliseconds(),
+		"items_fetched", len(fetched),
+		"items_total", len(res),
+	)
+
+	return res, err
+}
+
+func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []Notification {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	// 各 Provider の結果を収集するチャネル
 	resultChan := make(chan []Notification, len(s.providers))
 	var wg sync.WaitGroup
 
@@ -35,44 +67,26 @@ func (s *Service) AggregateAll(ctx context.Context) []Notification {
 		go func(p Provider) {
 			defer wg.Done()
 
-			// 各 Provider ごとの処理
-			s.logger.InfoContext(ctx, "fetching from provider", "name", p.Name())
+			// 各 Provider のログにも ID が付与される
+			l.InfoContext(ctx, "fetching from provider", "provider", p.Name())
 
-			// Provider 内でタイムアウトが起きた際も ctx.Done() で検知できる
 			ns, err := p.Fetch(ctx)
 			if err != nil {
-				s.logger.ErrorContext(ctx, "fetch error", "name", p.Name(), "error", err)
+				l.ErrorContext(ctx, "provider fetch error", "provider", p.Name(), "error", err)
 				return
 			}
 			resultChan <- ns
 		}(p)
 	}
 
-	// すべての Provider が終わったらチャネルを閉じる
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	var allNotifications []Notification
-	// 結果を収集（タイムアウトしたものはここに含まれない）
+	var all []Notification
 	for ns := range resultChan {
-		allNotifications = append(allNotifications, ns...)
+		all = append(all, ns...)
 	}
-
-	return allNotifications
-}
-
-func (s *Service) AggregateAndSave(ctx context.Context) ([]Notification, error) {
-	// 1. 段階 2 の並列取得を実行
-	fetched := s.AggregateAll(ctx)
-
-	// 2. 段階 3: DB に保存（重複排除は Repository 側で実施）
-	if err := s.repo.SaveAll(ctx, fetched); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save notifications", "error", err)
-		// 保存失敗しても、メモリ上のデータは返せるので続行
-	}
-
-	// 3. 最新の状態を DB から取得して返す
-	return s.repo.FetchCached(ctx)
+	return all
 }
