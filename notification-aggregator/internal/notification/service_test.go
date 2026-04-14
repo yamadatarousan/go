@@ -70,5 +70,4 @@ func TestService_AggregateAndSave(t *testing.T) {
 			}
 		})
 	}
-
 }
