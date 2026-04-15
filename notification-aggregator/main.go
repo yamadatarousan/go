@@ -53,8 +53,22 @@ func main() {
 
 	// 4. ルーティングとミドルウェアの適用 (Stage 4)
 	mux := http.NewServeMux()
+
+	// 1. LoggingMiddleware(logger) を実行すると、
+	// 「loggerを内蔵した、RequestIDMiddlewareと同じ型の関数」が返ってくる。
+	loggingWithLogger := handler.LoggingMiddleware(logger)
+
+	// 2. それを使ってハンドラーを包む
+	hWithLog := loggingWithLogger(h)
+
+	// 3. さらに RequestIDMiddleware で包む
+	// finalHandler := handler.RequestIDMiddleware(hWithLog)
+
+	// --- これを1行で書くと ---
+	// finalHandler := handler.RequestIDMiddleware(handler.LoggingMiddleware(logger)(h))
+
 	// ハンドラーを RequestIDMiddleware でラップして登録
-	mux.Handle("/notifications", handler.RequestIDMiddleware(h))
+	mux.Handle("/notifications", handler.RequestIDMiddleware(hWithLog))
 
 	// 4. サーバーの起動
 	srv := &http.Server{
