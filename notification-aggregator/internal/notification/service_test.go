@@ -9,16 +9,17 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"notification-aggregator/internal/notification"
+	"notification-sdk"
 )
 
 // MockProvider はテスト用のダミープロバイダーです
 type MockProvider struct {
 	name string
-	data []notification.Notification
+	data []sdk.Notification
 	err  error
 }
 
-func (m *MockProvider) Fetch(ctx context.Context) ([]notification.Notification, error) {
+func (m *MockProvider) Fetch(ctx context.Context) ([]sdk.Notification, error) {
 	return m.data, m.err
 }
 func (m *MockProvider) Name() string { return m.name }
@@ -34,21 +35,21 @@ func TestService_AggregateAndSave(t *testing.T) {
 	// 2. テストケースの定義 (Table Driven Test)
 	tests := []struct {
 		name      string
-		providers []notification.Provider
+		providers []sdk.Provider
 		wantCount int
 	}{
 		{
 			name: "正常系: 2つのソースから取得",
-			providers: []notification.Provider{
-				&MockProvider{name: "p1", data: []notification.Notification{{ID: "1", Title: "T1"}}},
-				&MockProvider{name: "p2", data: []notification.Notification{{ID: "2", Title: "T2"}}},
+			providers: []sdk.Provider{
+				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "1", Title: "T1"}}},
+				&MockProvider{name: "p2", data: []sdk.Notification{{ID: "2", Title: "T2"}}},
 			},
 			wantCount: 2,
 		},
 		{
 			name: "異常系: 片方がエラーでももう片方は取得できる",
-			providers: []notification.Provider{
-				&MockProvider{name: "p1", data: []notification.Notification{{ID: "3", Title: "T3"}}},
+			providers: []sdk.Provider{
+				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "3", Title: "T3"}}},
 				&MockProvider{name: "err_p", err: sql.ErrConnDone},
 			},
 			wantCount: 1,

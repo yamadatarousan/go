@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"database/sql"
+	"notification-sdk"
 )
 
 type Repository struct {
@@ -14,7 +15,7 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 // SaveAll は通知を DB に保存します。重複は ID で判断して無視します（Dedupe）。
-func (r *Repository) SaveAll(ctx context.Context, notes []Notification) error {
+func (r *Repository) SaveAll(ctx context.Context, notes []sdk.Notification) error {
 	// 段階 3: 重複排除のため INSERT OR IGNORE を使用
 	query := `
 			INSERT OR IGNORE INTO notifications (id, source, title, content, created_at)
@@ -30,7 +31,7 @@ func (r *Repository) SaveAll(ctx context.Context, notes []Notification) error {
 }
 
 // FetchCached は DB から過去の通知を取得します（キャッシュ利用）。
-func (r *Repository) FetchCached(ctx context.Context) ([]Notification, error) {
+func (r *Repository) FetchCached(ctx context.Context) ([]sdk.Notification, error) {
 	query := `SELECT id, source, title, content, created_at FROM notifications ORDER BY created_at DESC LIMIT 50`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -38,9 +39,9 @@ func (r *Repository) FetchCached(ctx context.Context) ([]Notification, error) {
 	}
 	defer rows.Close()
 
-	var results []Notification
+	var results []sdk.Notification
 	for rows.Next() {
-		var n Notification
+		var n sdk.Notification
 		if err := rows.Scan(&n.ID, &n.Source, &n.Title, &n.Content, &n.CreatedAt); err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io" // 追加: io.Discard を使うため
 	"log/slog"
+	"notification-sdk"
 	"testing"
 )
 
@@ -11,10 +12,10 @@ import (
 
 type internalMockProvider struct {
 	name string
-	data []Notification
+	data []sdk.Notification
 }
 
-func (m *internalMockProvider) Fetch(ctx context.Context) ([]Notification, error) {
+func (m *internalMockProvider) Fetch(ctx context.Context) ([]sdk.Notification, error) {
 	return m.data, nil
 }
 func (m *internalMockProvider) Name() string { return m.name }
@@ -22,12 +23,12 @@ func (m *internalMockProvider) Name() string { return m.name }
 func BenchmarkAggregateAllInternal(b *testing.B) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
-	dummyData := make([]Notification, 100)
+	dummyData := make([]sdk.Notification, 100)
 	for i := range dummyData {
-		dummyData[i] = Notification{ID: "bench", Title: "Optimizing"}
+		dummyData[i] = sdk.Notification{ID: "bench", Title: "Optimizing"}
 	}
 
-	providers := []Provider{
+	providers := []sdk.Provider{
 		&internalMockProvider{name: "p1", data: dummyData},
 		&internalMockProvider{name: "p2", data: dummyData},
 		&internalMockProvider{name: "p3", data: dummyData},

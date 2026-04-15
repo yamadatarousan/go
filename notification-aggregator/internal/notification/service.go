@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"notification-aggregator/internal/contextutil"
+	"notification-sdk"
 )
 
 type Service struct {
 	repo      *Repository
-	providers []Provider
+	providers []sdk.Provider
 	logger    *slog.Logger
 }
 
-func NewService(logger *slog.Logger, repo *Repository, providers ...Provider) *Service {
+func NewService(logger *slog.Logger, repo *Repository, providers ...sdk.Provider) *Service {
 	return &Service{
 		repo:      repo,
 		providers: providers,
@@ -23,7 +24,7 @@ func NewService(logger *slog.Logger, repo *Repository, providers ...Provider) *S
 	}
 }
 
-func (s *Service) AggregateAndSave(ctx context.Context) ([]Notification, error) {
+func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, error) {
 	start := time.Now()
 	reqID := contextutil.GetRequestID(ctx)
 
@@ -55,16 +56,16 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]Notification, error) 
 	return res, err
 }
 
-func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []Notification {
+func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []sdk.Notification {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	resultChan := make(chan []Notification, len(s.providers))
+	resultChan := make(chan []sdk.Notification, len(s.providers))
 	var wg sync.WaitGroup
 
 	for _, p := range s.providers {
 		wg.Add(1)
-		go func(p Provider) {
+		go func(p sdk.Provider) {
 			defer wg.Done()
 
 			// 各 Provider のログにも ID が付与される
@@ -84,7 +85,7 @@ func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []No
 		close(resultChan)
 	}()
 
-	var all []Notification
+	var all []sdk.Notification
 	for ns := range resultChan {
 		all = append(all, ns...)
 	}
