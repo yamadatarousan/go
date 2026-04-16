@@ -6,16 +6,16 @@ import (
 	"notification-sdk"
 )
 
-type Repository struct {
+type SqliteRepository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *sql.DB) Repository {
+	return &SqliteRepository{db: db}
 }
 
 // SaveAll は通知を DB に保存します。重複は ID で判断して無視します（Dedupe）。
-func (r *Repository) SaveAll(ctx context.Context, notes []sdk.Notification) error {
+func (r *SqliteRepository) SaveAll(ctx context.Context, notes []sdk.Notification) error {
 	// 段階 3: 重複排除のため INSERT OR IGNORE を使用
 	query := `
 			INSERT OR IGNORE INTO notifications (id, source, title, content, created_at)
@@ -31,7 +31,7 @@ func (r *Repository) SaveAll(ctx context.Context, notes []sdk.Notification) erro
 }
 
 // FetchCached は DB から過去の通知を取得します（キャッシュ利用）。
-func (r *Repository) FetchCached(ctx context.Context) ([]sdk.Notification, error) {
+func (r *SqliteRepository) FetchCached(ctx context.Context) ([]sdk.Notification, error) {
 	query := `SELECT id, source, title, content, created_at FROM notifications ORDER BY created_at DESC LIMIT 50`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {

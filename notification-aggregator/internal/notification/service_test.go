@@ -2,12 +2,10 @@ package notification_test
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	"notification-aggregator/internal/notification"
 	"notification-sdk"
 )
@@ -24,18 +22,30 @@ func (m *MockProvider) Fetch(ctx context.Context) ([]sdk.Notification, error) {
 }
 func (m *MockProvider) Name() string { return m.name }
 
+// Repository Mock: DBを使わずプロパティで制御する
+type MockRepository struct {
+	saveErr error
+	saved   []sdk.Notification
+}
+
+func (m *MockRepository) SaveAll(ctx context.Context, items []sdk.Notification) error {
+	m.saved = items  // 渡された引数をプロパティに保存（記録）
+	return m.saveErr // プロパティにセットした値を返す（制御）
+}
+
+func (m *MockRepository) FetchCached(ctx context.Context) ([]sdk.Notification, error) {
+	return m.saved, nil
+}
+
+// --- テスト本体 ---
+
 func TestService_AggregateAndSave(t *testing.T) {
-	// 1. テスト用 DB の準備 (メモリ上の SQLite)
-	db, _ := sql.Open("sqlite3", ":memory:")
-	_, _ = db.Exec(`CREATE TABLE notifications (id TEXT PRIMARY KEY, source TEXT, title TEXT, content TEXT, created_at DATETIME)`)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	repo := notification.NewRepository(db)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	// 2. テストケースの定義 (Table Driven Test)
 	tests := []struct {
 		name      string
 		providers []sdk.Provider
+		saveErr   error // Repositoryを失敗させたい時にセットする
 		wantCount int
 	}{
 		{
@@ -47,17 +57,20 @@ func TestService_AggregateAndSave(t *testing.T) {
 			wantCount: 2,
 		},
 		{
-			name: "異常系: 片方がエラーでももう片方は取得できる",
+			name: "異常系: DB保存が失敗しても取得データは返る",
 			providers: []sdk.Provider{
 				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "3", Title: "T3"}}},
-				&MockProvider{name: "err_p", err: sql.ErrConnDone},
 			},
+			saveErr:   context.DeadlineExceeded, // ここでRepositoryの挙動を「仕込む」
 			wantCount: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// RepositoryをMockで作る
+			repo := &MockRepository{saveErr: tt.saveErr}
+
 			svc := notification.NewService(logger, repo, tt.providers...)
 
 			got, err := svc.AggregateAndSave(context.Background())
@@ -65,9 +78,8 @@ func TestService_AggregateAndSave(t *testing.T) {
 				t.Fatalf("AggregateAndSave failed: %v", err)
 			}
 
-			// 最新の取得数を確認
-			if len(got) < tt.wantCount {
-				t.Errorf("got %d items, want at least %d", len(got), tt.wantCount)
+			if len(got) != tt.wantCount {
+				t.Errorf("got %d items, want %d", len(got), tt.wantCount)
 			}
 		})
 	}

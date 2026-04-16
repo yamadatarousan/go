@@ -10,13 +10,19 @@ import (
 	"notification-sdk"
 )
 
+// 1. Repository が備えるべき機能を定義
+type Repository interface {
+	SaveAll(ctx context.Context, items []sdk.Notification) error
+	FetchCached(ctx context.Context) ([]sdk.Notification, error)
+}
+
 type Service struct {
-	repo      *Repository
+	repo      Repository
 	providers []sdk.Provider
 	logger    *slog.Logger
 }
 
-func NewService(logger *slog.Logger, repo *Repository, providers ...sdk.Provider) *Service {
+func NewService(logger *slog.Logger, repo Repository, providers ...sdk.Provider) *Service {
 	return &Service{
 		repo:      repo,
 		providers: providers,
