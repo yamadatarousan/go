@@ -1,6 +1,7 @@
 {
   "providers": [
     { "type": "mock", "name": "MainMockService" },
-    { "type": "slow", "name": "SecondarySlowService" }
+    { "type": "slow", "name": "SecondarySlowService" },
+    { "type": "hogehoge", "name": "hogehoge" }
   ]
 }
