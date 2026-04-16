@@ -1,0 +1,6 @@
+{
+  "providers": [
+    { "type": "mock", "name": "MainMockService" },
+    { "type": "slow", "name": "SecondarySlowService" }
+  ]
+}

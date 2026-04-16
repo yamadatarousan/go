@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"notification-aggregator/internal/handler"
 	"notification-aggregator/internal/notification"
 	"notification-aggregator/internal/provider"
+	"notification-sdk"
 )
 
 func main() {
@@ -43,12 +45,39 @@ func main() {
 	)`)
 
 	// 2. 依存関係の構築
+	// --- 1. 設定ファイルの読み込み ---
+	configFile, err := os.ReadFile("config.json")
+	if err != nil {
+		logger.Error("failed to read config file", "error", err)
+		os.Exit(1)
+	}
+
+	// JSONをパースするための構造体定義（一時的なものでもOK）
+	var config struct {
+		Providers []provider.ProviderConfig `json:"providers"`
+	}
+
+	if err := json.Unmarshal(configFile, &config); err != nil {
+		logger.Error("failed to unmarshal config", "error", err)
+		os.Exit(1)
+	}
+
+	// --- 2. Factory を使ってプロバイダーを動的に生成 ---
+	var providers []sdk.Provider
+	for _, pCfg := range config.Providers {
+		p := provider.NewProvider(pCfg)
+		if p != nil {
+			providers = append(providers, p)
+			logger.Info("provider loaded", "name", pCfg.Name, "type", pCfg.Type)
+		} else {
+			logger.Warn("unknown provider type", "type", pCfg.Type)
+		}
+	}
+
 	// 段階 2: 複数のソースを登録
 	// 下位レイヤー (Provider) から順に作成して注入する
 	repo := notification.NewRepository(db)
-	p1 := &provider.MockProvider{}
-	p2 := &provider.SlowProvider{} // 遅いソース
-	svc := notification.NewService(logger, repo, p1, p2)
+	svc := notification.NewService(logger, repo, providers...)
 	h := handler.NewNotificationHandler(svc)
 
 	// 4. ルーティングとミドルウェアの適用 (Stage 4)
