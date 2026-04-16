@@ -31,7 +31,6 @@ func NewService(logger *slog.Logger, repo Repository, providers ...sdk.Provider)
 }
 
 func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, error) {
-	start := time.Now()
 	reqID := contextutil.GetRequestID(ctx)
 
 	// Stage 4: このメソッド内でのログに Request ID を固定で付与する
@@ -47,19 +46,12 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 	saveStart := time.Now()
 	if err := s.repo.SaveAll(ctx, fetched); err != nil {
 		l.ErrorContext(ctx, "failed to save notifications", "error", err)
+		return nil, err
 	}
 	l.InfoContext(ctx, "db save finished", "duration_ms", time.Since(saveStart).Milliseconds())
 
 	// 3. 最新リストの取得
-	res, err := s.repo.FetchCached(ctx)
-
-	l.InfoContext(ctx, "aggregation and save completed",
-		"total_duration_ms", time.Since(start).Milliseconds(),
-		"items_fetched", len(fetched),
-		"items_total", len(res),
-	)
-
-	return res, err
+	return s.repo.FetchCached(ctx)
 }
 
 func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []sdk.Notification {

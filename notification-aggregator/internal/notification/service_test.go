@@ -46,23 +46,24 @@ func TestService_AggregateAndSave(t *testing.T) {
 		name      string
 		providers []sdk.Provider
 		saveErr   error // Repositoryを失敗させたい時にセットする
-		wantCount int
+		wantCount int   // 正常系なら期待件数、異常系なら 0
 	}{
 		{
-			name: "正常系: 2つのソースから取得",
+			name: "正常系: 複数Providerから合計3件取得して保存",
 			providers: []sdk.Provider{
-				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "1", Title: "T1"}}},
-				&MockProvider{name: "p2", data: []sdk.Notification{{ID: "2", Title: "T2"}}},
+				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "1"}, {ID: "2"}}},
+				&MockProvider{name: "p2", data: []sdk.Notification{{ID: "3"}}},
 			},
-			wantCount: 2,
+			saveErr:   nil,
+			wantCount: 3,
 		},
 		{
-			name: "異常系: DB保存が失敗しても取得データは返る",
+			name: "異常系: DB保存失敗時は 0 件を返す",
 			providers: []sdk.Provider{
 				&MockProvider{name: "p1", data: []sdk.Notification{{ID: "3", Title: "T3"}}},
 			},
 			saveErr:   context.DeadlineExceeded, // ここでRepositoryの挙動を「仕込む」
-			wantCount: 1,
+			wantCount: 0,
 		},
 	}
 
@@ -74,12 +75,23 @@ func TestService_AggregateAndSave(t *testing.T) {
 			svc := notification.NewService(logger, repo, tt.providers...)
 
 			got, err := svc.AggregateAndSave(context.Background())
-			if err != nil {
-				t.Fatalf("AggregateAndSave failed: %v", err)
+
+			// 検証1: エラーの有無が期待通りか
+			if (err != nil) != (tt.saveErr != nil) {
+				t.Fatalf("[%s] エラーの有無が一致しません: 期待=%v, 実際=%v", tt.name, tt.saveErr, err)
 			}
 
+			// 検証2: 戻り値の件数が期待通りか (異常系なら 0, 正常系なら providersの件数)
 			if len(got) != tt.wantCount {
-				t.Errorf("got %d items, want %d", len(got), tt.wantCount)
+				t.Errorf("[%s] 戻り値の件数が違います: 期待=%d, 実際=%d", tt.name, tt.wantCount, len(got))
+			}
+
+			// 3. 【スパイ】Repositoryにデータが正しく渡されたかの検証
+			if tt.saveErr == nil {
+				// 正常系なら Provider の合計件数が保存されているはず
+				if len(repo.saved) != tt.wantCount {
+					t.Errorf("[%s] 保存された件数が不正です: 期待=%d, 実際=%d", tt.name, tt.wantCount, len(repo.saved))
+				}
 			}
 		})
 	}
