@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime"
 	"testing"
+	"time"
 
 	"notification-aggregator/internal/notification"
 	"notification-sdk"
@@ -94,5 +96,54 @@ func TestService_AggregateAndSave(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// 1. このテスト専用の「激遅 Provider」を定義
+type slowMockProvider struct{}
+
+// Name メソッドを実装（インターフェースの要件）
+func (p *slowMockProvider) Name() string {
+	return "slow-mock"
+}
+
+// Fetch メソッドを実装（インターフェースの要件）
+func (p *slowMockProvider) Fetch(ctx context.Context) ([]sdk.Notification, error) {
+	select {
+	case <-time.After(5 * time.Second): // 5秒待機
+		return []sdk.Notification{{ID: "slow", Title: "Late"}}, nil
+	case <-ctx.Done(): // 親の Context がキャンセルされたら即座に終了
+		return nil, ctx.Err()
+	}
+}
+
+func TestAggregateAndSave_GoroutineLeak(t *testing.T) {
+	// 1. 実行前の goroutine 数を記録
+	initialGoroutines := runtime.NumGoroutine()
+
+	// 2. 5秒かかる「激遅」MockProvider を作成
+	slowProvider := &slowMockProvider{}
+
+	// 3. 依存関係のセットアップ
+	repo := &MockRepository{}
+	logger := slog.Default()
+
+	service := notification.NewService(logger, repo, slowProvider)
+
+	// 4. 実行（内部で2秒のタイムアウトが発生し、すぐ戻ってくる）
+	ctx := context.Background()
+	_, _ = service.AggregateAndSave(ctx)
+
+	// 5. Worker goroutine が後片付け（チャネルへの送信・終了）を終えるのを少し待つ
+	time.Sleep(200 * time.Millisecond)
+
+	// 6. 実行後の goroutine 数を記録
+	finalGoroutines := runtime.NumGoroutine()
+
+	// 7. リーク判定
+	if finalGoroutines > initialGoroutines {
+		t.Errorf("Goroutine leak detected! Initial: %d, Final: %d", initialGoroutines, finalGoroutines)
+	} else {
+		t.Logf("No leak: Initial: %d, Final: %d", initialGoroutines, finalGoroutines)
 	}
 }
