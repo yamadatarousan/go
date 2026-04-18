@@ -2,6 +2,8 @@ package notification
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -40,13 +42,17 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 	/// 1. 並列取得 (Stage 2)
 	// aggregateAllInternal にも ID を引き継ぐため、一時的に logger を差し替えるのではなく
 	// 内部処理で l (子ロガー) を使用するよう配慮します。
-	fetched := s.aggregateAllInternal(ctx, l)
+	fetched, err := s.aggregateAllInternal(ctx, l)
+	if err != nil {
+		// 全滅じゃなければ、エラーをログに出しつつ処理を続行する、といった判断ができる
+		l.WarnContext(ctx, "partial failure during aggregation", "error", err)
+	}
 
 	// 2. DB保存 (Stage 3) と計測 (Stage 4）
+	// 取得できた分（fetched）だけで保存処理を進める
 	saveStart := time.Now()
 	if err := s.repo.SaveAll(ctx, fetched); err != nil {
-		l.ErrorContext(ctx, "failed to save notifications", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to save: %w", err)
 	}
 	l.InfoContext(ctx, "db save finished", "duration_ms", time.Since(saveStart).Milliseconds())
 
@@ -54,11 +60,16 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 	return s.repo.FetchCached(ctx)
 }
 
-func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []sdk.Notification {
+func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) ([]sdk.Notification, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	resultChan := make(chan []sdk.Notification, len(s.providers))
+	// 通知結果とエラー、それぞれを回収するチャネルを用意
+	// バッファサイズを provider 数にしておくことで、送信側のブロックを防ぐ
+	numProviders := len(s.providers)
+	resultChan := make(chan []sdk.Notification, numProviders)
+	errChan := make(chan error, numProviders)
+
 	var wg sync.WaitGroup
 
 	for _, p := range s.providers {
@@ -72,20 +83,33 @@ func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) []sd
 			ns, err := p.Fetch(ctx)
 			if err != nil {
 				l.ErrorContext(ctx, "provider fetch error", "provider", p.Name(), "error", err)
+				// %w でラップしてチャネルへ
+				errChan <- fmt.Errorf("provider %s: %w", p.Name(), err)
 				return
 			}
 			resultChan <- ns
 		}(p)
 	}
 
+	// 監視役：全 Worker が終わったらチャネルを閉じる
 	go func() {
 		wg.Wait()
 		close(resultChan)
+		close(errChan)
 	}()
 
 	var all []sdk.Notification
 	for ns := range resultChan {
 		all = append(all, ns...)
 	}
-	return all
+
+	// エラーを回収
+	var allErrors []error
+	for err := range errChan {
+		allErrors = append(allErrors, err)
+	}
+
+	// errors.Join で複数のエラーを一つにまとめる
+	// allErrors が空（len=0）なら、nil が返るので安全
+	return all, errors.Join(allErrors...)
 }

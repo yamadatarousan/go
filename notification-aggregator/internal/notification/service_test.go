@@ -2,6 +2,8 @@ package notification_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
@@ -145,5 +147,42 @@ func TestAggregateAndSave_GoroutineLeak(t *testing.T) {
 		t.Errorf("Goroutine leak detected! Initial: %d, Final: %d", initialGoroutines, finalGoroutines)
 	} else {
 		t.Logf("No leak: Initial: %d, Final: %d", initialGoroutines, finalGoroutines)
+	}
+}
+
+func TestAggregateAndSave_PartialFailure(t *testing.T) {
+	// 1. 成功する Provider (データを入れる)
+	successProvider := &MockProvider{
+		name: "Slack",
+		data: []sdk.Notification{{ID: "msg-1", Title: "Hello"}},
+		err:  nil,
+	}
+
+	// 2. 失敗する Provider (エラーを入れる)
+	failProvider := &MockProvider{
+		name: "Github",
+		data: nil,
+		err:  errors.New("connection reset by peer"),
+	}
+
+	repo := &MockRepository{}
+	logger := slog.Default()
+
+	// 既存の構造体を渡すだけ
+	service := notification.NewService(logger, repo, successProvider, failProvider)
+
+	// 3. 実行
+	ctx := context.Background()
+	notifications, err := service.AggregateAndSave(ctx)
+
+	// 4. 検証
+	// 成功分は取れているか？
+	if len(notifications) != 1 {
+		t.Errorf("expected 1 notification, got %d", len(notifications))
+	}
+
+	// エラーメッセージの確認
+	if err != nil {
+		fmt.Printf("\n--- Joined Error Message ---\n%v\n----------------------------\n", err)
 	}
 }

@@ -39,6 +39,6 @@ func BenchmarkAggregateAllInternal(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = svc.aggregateAllInternal(ctx, logger)
+		_, _ = svc.aggregateAllInternal(ctx, logger)
 	}
 }
