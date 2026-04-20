@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"notification-aggregator/internal/contextutil"
+	"notification-aggregator/internal/logging"
 	"notification-aggregator/internal/notification"
 	"notification-sdk"
 )
@@ -276,8 +278,17 @@ func TestAggregateAndSave_TDT(t *testing.T) {
 			ctx, cancel := tt.setupContext()
 			defer cancel()
 
+			// 1. まず普通に JSONHandler を作る
+			baseHandler := slog.NewJSONHandler(os.Stdout, nil)
+			// 2. それを自作の ContextHandler で包む
+			logger := slog.New(&logging.ContextHandler{Handler: baseHandler})
+
+			// テスト用の Request ID を仕込む
+			testID := "test-req-123"
+			ctx = contextutil.WithRequestID(ctx, testID)
+
 			repo := &MockRepository{}
-			service := notification.NewService(slog.Default(), repo, tt.providers...)
+			service := notification.NewService(logger, repo, tt.providers...)
 
 			// 実行
 			got, err := service.AggregateAndSave(ctx)
