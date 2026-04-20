@@ -22,7 +22,15 @@ type MockProvider struct {
 }
 
 func (m *MockProvider) Fetch(ctx context.Context) ([]sdk.Notification, error) {
-	return m.data, m.err
+	// テストのためにあえて少し待機する（例えば 100ms）
+	// この間にキャンセルが来れば、それを即座に捕まえる
+	select {
+	case <-time.After(100 * time.Millisecond):
+		return m.data, m.err
+	case <-ctx.Done():
+		// キャンセルが来たら、処理を中断して理由を返す
+		return nil, ctx.Err()
+	}
 }
 func (m *MockProvider) Name() string { return m.name }
 
@@ -184,5 +192,30 @@ func TestAggregateAndSave_PartialFailure(t *testing.T) {
 	// エラーメッセージの確認
 	if err != nil {
 		fmt.Printf("\n--- Joined Error Message ---\n%v\n----------------------------\n", err)
+	}
+}
+
+func TestAggregateAndSave_Cancellation(t *testing.T) {
+	// 1. キャンセルできる Context を作成
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// 実行した瞬間にキャンセルする
+	cancel()
+
+	// サービスを実行
+	repo := &MockRepository{}
+	provider := &MockProvider{name: "Slow", data: nil, err: nil}
+	service := notification.NewService(slog.Default(), repo, provider)
+
+	_, err := service.AggregateAndSave(ctx)
+
+	// キャンセルが伝わっていれば、エラーが返ってくるはず
+	if err == nil {
+		t.Error("expected error due to cancellation, but got nil")
+	}
+
+	// エラーが context.Canceled か確認
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got: %v", err)
 	}
 }

@@ -44,6 +44,10 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 	// 内部処理で l (子ロガー) を使用するよう配慮します。
 	fetched, err := s.aggregateAllInternal(ctx, l)
 	if err != nil {
+		// キャンセルやタイムアウトの場合は「致命的」とみなして即リターンする
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err // ここで止める
+		}
 		// 全滅じゃなければ、エラーをログに出しつつ処理を続行する、といった判断ができる
 		l.WarnContext(ctx, "partial failure during aggregation", "error", err)
 	}
