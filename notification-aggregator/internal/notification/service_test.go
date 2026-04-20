@@ -219,3 +219,86 @@ func TestAggregateAndSave_Cancellation(t *testing.T) {
 		t.Errorf("expected context.Canceled error, got: %v", err)
 	}
 }
+
+func TestAggregateAndSave_TDT(t *testing.T) {
+	// テストケースの「表（テーブル）」を定義する
+	tests := []struct {
+		name         string
+		setupContext func() (context.Context, context.CancelFunc)
+		providers    []sdk.Provider
+		wantCount    int
+		wantErr      error
+	}{
+		{
+			name: "Success: 全Providerが成功",
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 5*time.Second)
+			},
+			providers: []sdk.Provider{
+				&MockProvider{name: "P1", data: []sdk.Notification{{ID: "1"}}, err: nil},
+				&MockProvider{name: "P2", data: []sdk.Notification{{ID: "2"}}, err: nil},
+			},
+			wantCount: 2,
+			wantErr:   nil,
+		},
+		{
+			name: "Partial Failure: 一部失敗しても続行する",
+			setupContext: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 5*time.Second)
+			},
+			providers: []sdk.Provider{
+				&MockProvider{name: "Success", data: []sdk.Notification{{ID: "1"}}, err: nil},
+				&MockProvider{name: "Fail", data: nil, err: errors.New("network error")}, // 部分失敗
+			},
+			wantCount: 1,   // 成功した1件だけ取れるはず
+			wantErr:   nil, // 致命的エラーではないので戻り値エラーは nil
+		},
+		{
+			name: "Fatal: キャンセルされたら即座にエラーを返す",
+			setupContext: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel() // 実行した瞬間にキャンセル状態にする
+				return ctx, cancel
+			},
+			providers: []sdk.Provider{
+				// 少し待つ（キャンセルを検知する）Provider
+				&MockProvider{name: "Slow", data: nil, err: nil},
+			},
+			wantCount: 0,
+			wantErr:   context.Canceled, // キャンセルエラーが返ってくるはず
+		},
+	}
+
+	// テーブルの要素をループで回して、サブテストとして実行
+	for _, tt := range tests {
+		// t.Run で個別のテストとして実行する
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.setupContext()
+			defer cancel()
+
+			repo := &MockRepository{}
+			service := notification.NewService(slog.Default(), repo, tt.providers...)
+
+			// 実行
+			got, err := service.AggregateAndSave(ctx)
+
+			// 1. エラーの検証
+			if tt.wantErr != nil {
+				// 期待するエラーがある場合（errors.Is で中身を判定）
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+			} else {
+				// エラーを期待していないのにエラーが出た場合
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+
+			// 2. 件数の検証
+			if len(got) != tt.wantCount {
+				t.Errorf("expected %d notifications, got %d", tt.wantCount, len(got))
+			}
+		})
+	}
+}
