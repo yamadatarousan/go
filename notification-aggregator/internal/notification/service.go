@@ -43,25 +43,49 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 	// aggregateAllInternal にも ID を引き継ぐため、一時的に logger を差し替えるのではなく
 	// 内部処理で l (子ロガー) を使用するよう配慮します。
 	fetched, err := s.aggregateAllInternal(ctx, l)
+
+	// まず、リクエスト自体が死んでいるかを確認する
+	if ctx.Err() != nil {
+		l.ErrorContext(ctx, "request context finished", "error", ctx.Err())
+		return nil, ctx.Err()
+	}
+
 	if err != nil {
-		// キャンセルやタイムアウトの場合は「致命的」とみなして即リターンする
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err // ここで止める
+		// もしデータが取れていれば、エラーがあっても無視して保存に進む
+		if len(fetched) == 0 {
+			l.ErrorContext(ctx, "all providers failed", "error", err)
+			return nil, fmt.Errorf("all providers failed: %w", err)
 		}
+
 		// 全滅じゃなければ、エラーをログに出しつつ処理を続行する、といった判断ができる
 		l.WarnContext(ctx, "partial failure during aggregation", "error", err)
+	}
+
+	// ここを明示的に初期化しておく（nilを防ぐ）
+	if fetched == nil {
+		fetched = []sdk.Notification{}
 	}
 
 	// 2. DB保存 (Stage 3) と計測 (Stage 4）
 	// 取得できた分（fetched）だけで保存処理を進める
 	saveStart := time.Now()
-	if err := s.repo.SaveAll(ctx, fetched); err != nil {
-		return nil, fmt.Errorf("failed to save: %w", err)
+	if len(fetched) > 0 {
+		if err := s.repo.SaveAll(ctx, fetched); err != nil {
+			l.ErrorContext(ctx, "failed to save to db", "error", err)
+			return nil, fmt.Errorf("failed to save: %w", err)
+		}
 	}
 	l.InfoContext(ctx, "db save finished", "duration_ms", time.Since(saveStart).Milliseconds())
 
-	// 3. 最新リストの取得
-	return s.repo.FetchCached(ctx)
+	// 【診断ログを追加】
+	l.Info("debug_check",
+		"fetched_is_nil", fetched == nil,
+		"fetched_len", len(fetched),
+		"fetched_ptr", fmt.Sprintf("%p", fetched))
+
+	// 3. 【修正】DBから再取得せず、手元の fetched を直接返す
+	//    これで「DBから取れない」というバグ要因を一つ消せます
+	return fetched, nil
 }
 
 func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) ([]sdk.Notification, error) {

@@ -13,14 +13,19 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" // ドライバのインポートを忘れずに
 	"notification-aggregator/internal/handler"
+	"notification-aggregator/internal/logging"
 	"notification-aggregator/internal/notification"
 	"notification-aggregator/internal/provider"
+
 	"notification-sdk"
 )
 
 func main() {
 	// 1. ログの設定 (段階5の準備を兼ねて slog を使用)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	baseHandler := slog.NewJSONHandler(os.Stdout, nil)
+	// ★ここを自作の ContextHandler で包む
+	logger := slog.New(&logging.ContextHandler{Handler: baseHandler})
+	slog.SetDefault(logger)
 
 	// 2. DBの初期化と接続プールの設定 (ここが Stage 3 のキモ)
 	db, err := sql.Open("sqlite3", "./notifications.db")
