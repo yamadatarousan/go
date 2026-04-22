@@ -88,7 +88,7 @@ func TestService_AggregateAndSave(t *testing.T) {
 
 			svc := notification.NewService(logger, repo, tt.providers...)
 
-			got, err := svc.AggregateAndSave(context.Background())
+			got, _, err := svc.AggregateAndSave(context.Background())
 
 			// 検証1: エラーの有無が期待通りか
 			if (err != nil) != (tt.saveErr != nil) {
@@ -144,7 +144,7 @@ func TestAggregateAndSave_GoroutineLeak(t *testing.T) {
 
 	// 4. 実行（内部で2秒のタイムアウトが発生し、すぐ戻ってくる）
 	ctx := context.Background()
-	_, _ = service.AggregateAndSave(ctx)
+	_, _, _ = service.AggregateAndSave(ctx)
 
 	// 5. Worker goroutine が後片付け（チャネルへの送信・終了）を終えるのを少し待つ
 	time.Sleep(200 * time.Millisecond)
@@ -183,7 +183,7 @@ func TestAggregateAndSave_PartialFailure(t *testing.T) {
 
 	// 3. 実行
 	ctx := context.Background()
-	notifications, err := service.AggregateAndSave(ctx)
+	notifications, _, err := service.AggregateAndSave(ctx)
 
 	// 4. 検証
 	// 成功分は取れているか？
@@ -209,7 +209,7 @@ func TestAggregateAndSave_Cancellation(t *testing.T) {
 	provider := &MockProvider{name: "Slow", data: nil, err: nil}
 	service := notification.NewService(slog.Default(), repo, provider)
 
-	_, err := service.AggregateAndSave(ctx)
+	_, _, err := service.AggregateAndSave(ctx)
 
 	// キャンセルが伝わっていれば、エラーが返ってくるはず
 	if err == nil {
@@ -291,7 +291,7 @@ func TestAggregateAndSave_TDT(t *testing.T) {
 			service := notification.NewService(logger, repo, tt.providers...)
 
 			// 実行
-			got, err := service.AggregateAndSave(ctx)
+			got, _, err := service.AggregateAndSave(ctx)
 
 			// 1. エラーの検証
 			if tt.wantErr != nil {

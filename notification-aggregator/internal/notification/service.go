@@ -32,32 +32,26 @@ func NewService(logger *slog.Logger, repo Repository, providers ...sdk.Provider)
 	}
 }
 
-func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, error) {
+func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, []string, error) {
 	reqID := contextutil.GetRequestID(ctx)
-
-	// Stage 4: このメソッド内でのログに Request ID を固定で付与する
 	l := s.logger.With("request_id", reqID)
 	l.InfoContext(ctx, "aggregation and save transaction started")
 
-	/// 1. 並列取得 (Stage 2)
-	// aggregateAllInternal にも ID を引き継ぐため、一時的に logger を差し替えるのではなく
-	// 内部処理で l (子ロガー) を使用するよう配慮します。
+	// 警告リストを初期化 (nullにならないようにする)
+	warnings := []string{}
+
+	// 1. 並列取得 (ここは多少のエラーは許容する)
 	fetched, err := s.aggregateAllInternal(ctx, l)
 
-	// まず、リクエスト自体が死んでいるかを確認する
-	if ctx.Err() != nil {
-		l.ErrorContext(ctx, "request context finished", "error", ctx.Err())
-		return nil, ctx.Err()
-	}
-
+	// ここでエラーがあっても、取得できたものがあれば処理を続ける
 	if err != nil {
 		// もしデータが取れていれば、エラーがあっても無視して保存に進む
 		if len(fetched) == 0 {
 			l.ErrorContext(ctx, "all providers failed", "error", err)
-			return nil, fmt.Errorf("all providers failed: %w", err)
+			return nil, []string{err.Error()}, fmt.Errorf("all providers failed: %w", err)
 		}
-
-		// 全滅じゃなければ、エラーをログに出しつつ処理を続行する、といった判断ができる
+		// 部分成功なら警告に追加して続行
+		warnings = append(warnings, err.Error())
 		l.WarnContext(ctx, "partial failure during aggregation", "error", err)
 	}
 
@@ -68,24 +62,15 @@ func (s *Service) AggregateAndSave(ctx context.Context) ([]sdk.Notification, err
 
 	// 2. DB保存 (Stage 3) と計測 (Stage 4）
 	// 取得できた分（fetched）だけで保存処理を進める
-	saveStart := time.Now()
 	if len(fetched) > 0 {
 		if err := s.repo.SaveAll(ctx, fetched); err != nil {
 			l.ErrorContext(ctx, "failed to save to db", "error", err)
-			return nil, fmt.Errorf("failed to save: %w", err)
+			return nil, warnings, fmt.Errorf("failed to save: %w", err)
 		}
+		l.InfoContext(ctx, "db save finished", "count", len(fetched))
 	}
-	l.InfoContext(ctx, "db save finished", "duration_ms", time.Since(saveStart).Milliseconds())
 
-	// 【診断ログを追加】
-	l.Info("debug_check",
-		"fetched_is_nil", fetched == nil,
-		"fetched_len", len(fetched),
-		"fetched_ptr", fmt.Sprintf("%p", fetched))
-
-	// 3. 【修正】DBから再取得せず、手元の fetched を直接返す
-	//    これで「DBから取れない」というバグ要因を一つ消せます
-	return fetched, nil
+	return fetched, warnings, nil
 }
 
 func (s *Service) aggregateAllInternal(ctx context.Context, l *slog.Logger) ([]sdk.Notification, error) {
